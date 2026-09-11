@@ -26,7 +26,7 @@ class FoxOBJLoader {
 
 		@returns An Object containing an Array of meshes (with materials applied) and a Map containing the materials from the MTL file (if it exists).
 	**/
-	public static function load(name:String, ?extraShaderFlags:Array<String>, ?customShaderPath:String):{meshes:Array<FoxMesh>, materials:Map<String, FoxMaterial>} {
+	public static function load(name:String, ?extraShaderFlags:Array<String>, ?customShaderPath:String, ?meshFactory:(name:String)->FoxMesh):{meshes:Array<FoxMesh>, materials:Map<String, FoxMaterial>} {
 		// Check cache
 		if(FoxCache.meshes().exists(name)) {
 			var meshes = FoxCache.meshes().get(name);
@@ -42,6 +42,8 @@ class FoxOBJLoader {
 			trace('[Foxlite > FoxOBJLoader]: Could not load OBJ: ${name} (Not found.)');
 			return null;
 		}
+
+		meshFactory ??= _ -> new FoxMesh();
 
 		// Per mesh data
 		var vertices:Array<Float> = [];
@@ -77,13 +79,15 @@ class FoxOBJLoader {
 
 		var materials:Map<String, FoxMaterial> = new StringMap();
 		var matPath:String = null; // But it's just a theory
+		
+		var meshName:String = "";
 
 		function finishMesh() {
 			curMesh?.setArrays(vertices, uvtData, indices, null, normals);
 			curMesh?.calculateBounds(vertices);
 			if(curMesh != null && curMesh.material == null) curMesh.material = FoxRenderer.MISSING_MATERIAL; // What happened to our material...
 					
-			curMesh = new FoxMesh();
+			curMesh = meshFactory(meshName);
 			curMesh.assetsKey = name;
 			meshes.push(curMesh);
 
@@ -112,13 +116,14 @@ class FoxOBJLoader {
 				};
 				case 'usemtl': { // Set material
 					var material = materials?.get(data.join(' ')); // Join spaces since names can have them
-					if(__prevMesh == curMesh && __prevMesh?.material != null && curMesh?.material != null) {
+					if(material != null && __prevMesh == curMesh && __prevMesh?.material != null && curMesh?.material != null) {
 						trace('Warning! Material "${material.name}" tried to overwrite mesh material "${curMesh.material.name}". FoxLite does not support per-face materials, skipping!!');
 					}
-					else curMesh.material = material;
+					else if (material != null) curMesh.material = material;
 					__prevMesh = curMesh;
 				};
 				case 'o': { // New object
+					meshName = data.join(' ');
 					finishMesh();
 					groupBuildStage = 0;
 				};
@@ -132,7 +137,7 @@ class FoxOBJLoader {
 					if(groupBuildStage == -1) {
 						// Model builder started without a mesh!
 						// We are probably loading a grouped mesh, defer build
-						curMesh = new FoxMesh();
+						curMesh = meshFactory(meshName);
 						curMesh.assetsKey = name;
 						meshes.push(curMesh);
 						groupBuildStage = 1;
