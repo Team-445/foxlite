@@ -1,32 +1,16 @@
 package foxlite.flixel;
 
 import StringTools;
-#if polymod
-import funkin.modding.base.ScriptedFlxSpriteGroup;
-#else
 import flixel.group.FlxSpriteGroup;
-#end
+#if dde
+import deepend.game.text.DeependBitmapText;
+#else
 import flixel.text.FlxText;
+#end
 import foxlite.renderer.FoxRenderer;
 import haxe.Timer;
 
-class FoxRenderMetrics extends #if polymod ScriptedFlxSpriteGroup #else FlxSpriteGroup #end {
-
-	public var template = StringTools.replace('
-	-- FoxLite $0 --
-	renderContext: $8
-	drawCalls: $1
-	triangles: $2
-	stateSwitches: $3
-	Allocations: $5
-	frameCount: $4
-	-------------
-	CPU FPS: $6
-	GPU FPS: $7
-	-------------
-	$9
-	', '\r', '');
-
+class FoxRenderMetrics extends FlxSpriteGroup {
 	public var extraInfo:String = "";
 
 	var HISTORY = 32;
@@ -38,12 +22,18 @@ class FoxRenderMetrics extends #if polymod ScriptedFlxSpriteGroup #else FlxSprit
 
 	var cpuLastTime:Float = 0;
 	var gpuLastTime:Float = 0;
-
+	
+	#if dde
+	var text:DeependBitmapText = new DeependBitmapText(0, 0, "", 16, "consolas");
+	#else
 	var text:FlxText = new FlxText();
+	#end
 
 	public function new(deltaHistory:Int=32) {
+		#if !dde
 		text.fieldHeight = 16;
 		text.size = 16;
+		#end
 		super();
 
 		HISTORY = deltaHistory;
@@ -87,25 +77,37 @@ class FoxRenderMetrics extends #if polymod ScriptedFlxSpriteGroup #else FlxSprit
 		}
 		cpuFPS /= HISTORY;
 		gpuFPS /= HISTORY;
-
-		var output:String = template;
-		var inst = FoxRenderer.renderedInstances > 0 ? '\n    (x${FoxRenderer.renderedInstances} instance${FoxRenderer.renderedInstances != 1 ? 's' : ''})' : '';
-		output = StringTools.replace(output, "$0", '${FoxRenderer.BUILD_NAME} v${FoxRenderer.VERSION}');
-		output = StringTools.replace(output, "$1", '${FoxRenderer.drawCalls}');
-		output = StringTools.replace(output, "$2", '${Std.int(FoxRenderer.verticesDrawn/3)} $inst');
-		output = StringTools.replace(output, "$3", '${FoxRenderer.stateSwitches}');
-		output = StringTools.replace(output, "$4", '${FoxRenderer.frameCount}');
-		output = StringTools.replace(output, "$5", '${FoxRenderer.allocationsThisFrame}');
-		output = StringTools.replace(output, "$6", '${Math.round(cpuFPS)}');
-		output = StringTools.replace(output, "$7", '${Math.round(gpuFPS)}');
-
+		
 		var version = FoxRenderer.getGLVersion();
 		var ctx = FoxRenderer.renderContext;
 		if(ctx == "") ctx = "(UNINITIALIZED)";
-		output = StringTools.replace(output, "$8", '${ctx} ${version}');
-		output = StringTools.replace(output, "$9", '$extraInfo');
+		
+		var instBuf = new StringBuf();
+		if (FoxRenderer.renderedInstances > 0)
+		{
+			instBuf.add('(x');
+			instBuf.add(FoxRenderer.renderedInstances);
+			instBuf.add(' instance');
+			if (FoxRenderer.renderedInstances != 1)
+				instBuf.add('s');
+			instBuf.add(')');
+		}
 
-		text.text = output;
+		var buf = new StringBuf();
+		buf.add('-- FoxLite '); 	buf.add(FoxRenderer.BUILD_NAME); 				buf.add(' v'); 		buf.add(FoxRenderer.VERSION); 	buf.add('--\n');
+		buf.add('renderContext: '); buf.add(ctx); buf.add(' '); 					buf.add(version); 	buf.add('\n');
+		buf.add('drawCalls: '); 	buf.add(FoxRenderer.drawCalls); 				buf.add('\n');
+		buf.add('triangles: '); 	buf.add(Std.int(FoxRenderer.verticesDrawn/3)); 	buf.add(' '); 		buf.add(instBuf.toString()); 	buf.add('\n');
+		buf.add('stateSwitches: '); buf.add(FoxRenderer.stateSwitches); 			buf.add('\n');
+		buf.add('Allocations: '); 	buf.add(FoxRenderer.allocationsThisFrame); 		buf.add('\n');
+		buf.add('frameCount: '); 	buf.add(FoxRenderer.frameCount); 				buf.add('\n');
+		buf.add('-------------\n');
+		buf.add('CPU FPS: '); 		buf.add(Math.round(cpuFPS)); 					buf.add('\n');
+		buf.add('GPU FPS: '); 		buf.add(Math.round(gpuFPS)); 					buf.add('\n');
+		buf.add('-------------\n');
+		buf.add(extraInfo);
+
+		text.text = buf.toString();
 	}
 
 	public override function destroy() {
