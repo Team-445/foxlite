@@ -128,7 +128,7 @@ class FoxMathUtil {
 	}
 
 	// My brain hurts
-	public static function transformMatrix(matTRS:Matrix3D, pos:Vector3D, rotEuler:Vector3D, scale:Vector3D):Matrix3D {
+	public static function transformMatrix(matTRS:Matrix3D, pos:Vector3D, rotEuler:Vector3D, scale:Vector3D, skewX:Float = 0.0, skewY:Float = 0.0):Matrix3D {
 		matTRS.copyRawDataFrom(MATRIX_IDENTITY); // identity()
 		if(!scale.equals(FoxMathUtil.ONE)) {
 			matTRS.appendScale(scale.x, scale.y, scale.z); // It's actually 2 new allocs, bruh openfl
@@ -144,6 +144,8 @@ class FoxMathUtil {
 		if(rot.z != 0) matTRS.appendRotation(rot.z, BACK);
 		if(rot.y != 0) matTRS.appendRotation(rot.y, UP);
 		if(rot.x != 0) matTRS.appendRotation(rot.x, RIGHT);
+
+		if (skewX != 0 || skewY != 0) appendSkew(matTRS, skewX, skewY);
 
 		matTRS.appendTranslation(pos.x, pos.y, pos.z);
 		FoxRenderer.allocationsThisFrame += 3;
@@ -346,5 +348,19 @@ class FoxMathUtil {
 		mvp.append(view);
 		mvp.append(projection);
 		return mvp;
+	}
+
+	public static function appendSkew(mat:Matrix3D, x = .0, y = .0)
+	{
+		var skb = Math.tan(y * degToRad);
+		var skc = Math.tan(x * degToRad);
+
+		mat.rawData[1] = mat.rawData[0] * skb + mat.rawData[1];
+		mat.rawData[4] = mat.rawData[4] + mat.rawData[5] * skc;
+
+		mat.rawData[13] = mat.rawData[12] * skb + mat.rawData[13];
+		mat.rawData[12] = mat.rawData[12] + mat.rawData[13] * skc;
+
+		return mat;
 	}
 }
