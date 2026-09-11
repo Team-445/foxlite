@@ -263,7 +263,7 @@ class FoxShader {
 		return source;
 	}
 
-	public static function fromAsset(name:String, ?flagsDefs:Array<String>):FoxShader {
+	public static function fromAsset(name:String, ?flagsDefs:Array<String>, ?output:FoxShader):FoxShader {
 		var flags:Array<String> = [];
 		if(flagsDefs != null) flags = FoxShader.sanitizeFlags(flagsDefs);
 		// Javascript removes [ ] when converting an array to string so we add them back
@@ -289,7 +289,7 @@ class FoxShader {
 
 		if(vert == "" && frag == "") return null;
 
-		var shader = FoxShader.fromSources(vert, frag, flags);
+		var shader = FoxShader.fromSources(vert, frag, flags, output);
 		shader.assetsKey = name;
 		trace("[FoxLite > FoxShader]: Add shader to cache: " + name + defHash);
 		FoxCache.shaders().set(name + defHash, shader);
