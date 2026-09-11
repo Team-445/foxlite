@@ -10,7 +10,12 @@ class FoxInstanceChunkData {
 	public var buffer:Float32Array;
 	public var glBuffer:VertexBuffer3D;
 
-	public function new() {}
+	public var dataPerVertex:Int;
+
+	public function new(dataPerVertex:Int = 4) 
+	{
+		this.dataPerVertex = dataPerVertex;
+	}
 
 	// -------------------------------------------------------
 	public var bytes:Bytes;
@@ -34,10 +39,10 @@ class FoxInstanceChunkData {
 
 	public function reallocate(context:Context3D, size:Int) {
 		glBuffer?.dispose();
-		glBuffer = context.createVertexBuffer(size, 4, cast 0);
+		glBuffer = context.createVertexBuffer(size, dataPerVertex, cast 0);
 
 		var init:Array<Float> = [];
-		init.resize(size*4);
+		init.resize(size*dataPerVertex);
 		
 		buffer = TypedArray.Float32Array(init);
 		#if js
