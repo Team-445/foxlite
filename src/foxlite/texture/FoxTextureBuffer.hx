@@ -1,7 +1,6 @@
 package foxlite.texture;
 
 import Reflect;
-import foxlite.polyfill.TypedArray;
 import foxlite.renderer.FoxRenderer;
 import foxlite.texture.FoxTexture;
 import haxe.io.Bytes;
@@ -57,9 +56,9 @@ class FoxTextureBuffer extends FoxTexture {
 	**/
 	public function new(length:Int, channels:Int=1) {
 		super();
-		create(length, channels);
 		filter = FoxTextureFilter.NEAREST;
 		wrapMode = FoxWrapMode.CLAMP;
+		create(length, channels);
 	}
 
 	/**
@@ -78,9 +77,7 @@ class FoxTextureBuffer extends FoxTexture {
 
 		_length = length;
 		
-		var data:Array<Float> = [];
-		data.resize(length * channels);
-		buffer = TypedArray.Float32Array(data); // Data gets initialized to 0f, no need for a loop
+		buffer = new Float32Array(length * channels);
 		bytes = cast buffer.buffer;
 		FoxRenderer.allocationsThisFrame += 2;
 
@@ -91,7 +88,7 @@ class FoxTextureBuffer extends FoxTexture {
 			case 4: "RGBA";
 			default: "";
 		}
-
+		
 		formatString += "32F";
 
 		/*if(!(format == FoxTextureBufferFormat.UINT8 && channels == 4)) formatString += switch(format) {
@@ -114,7 +111,7 @@ class FoxTextureBuffer extends FoxTexture {
 
 		final typeString = "FLOAT";
 
-		if(formatString == "32F") {
+		if(formatString == "32F" || formatString == "") {
 			trace("[Foxlite > FoxTextureBuffer]: Invalid buffer format!");
 			return;
 		}
@@ -125,6 +122,10 @@ class FoxTextureBuffer extends FoxTexture {
 
 		glTexture = FoxRenderer.createTextureStorage(length, 1, formatString, typeString);
 		pixelSize.x = 1.0 / length;
+
+		// Update texture state
+		__paramsNeedUpdate = true;
+		FoxRenderer.useTexture(0, this);
 	}
 
 	/**
@@ -134,6 +135,11 @@ class FoxTextureBuffer extends FoxTexture {
 	**/
 	public inline function updateGPU() {
 		var gl = #if foxlite_polymod GL; #else context.gl; #end // Use lime GL for HScript
+		
+		#if (js && html5)
+		gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0); // do NOT PREMULTIPLY RGB WITH ALPHA, it will MESS UP texture buffers.
+		#end
+
 		context.__bindGLTexture2D(glTexture.__textureID);
 		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, _length, 1, _glFormat, _glType, buffer);
 	}
@@ -142,42 +148,42 @@ class FoxTextureBuffer extends FoxTexture {
 	// Perhaps use an interface instead
 	var bytes:Bytes;
 
-	public function setFloat(pos:Int, v:Float):Void {
-		#if (js || !foxlite_polymod)
+	public inline function setFloat(pos:Int, v:Float):Void {
+		#if !foxlite_polymod
 		buffer[pos] = v;
 		#else
-		bytes.setFloat(pos<<1, v);
+		bytes.setFloat(pos<<2, v);
 		#end
 	}
 
-	public function getFloat(pos:Int):Float {
-		#if (js || !foxlite_polymod)
+	public inline function getFloat(pos:Int):Float {
+		#if !foxlite_polymod
 		return buffer[pos];
 		#else
-		return bytes.getFloat(pos<<1);
+		return bytes.getFloat(pos<<2);
 		#end
 	}
 	// -------------------------------------------------------
 
-	public function setVector2(pos:Int, v:Vector2) {
+	public inline function setVector2(pos:Int, v:Vector2) {
 		setFloat(pos  , v.x);
 		setFloat(pos+1, v.y);
 	}
 
-	public function setVector3(pos:Int, v:Vector3D) {
+	public inline function setVector3(pos:Int, v:Vector3D) {
 		setFloat(pos  , v.x);
 		setFloat(pos+1, v.y);
 		setFloat(pos+2, v.z);
 	}
 
-	public function setVector4(pos:Int, v:Vector3D) {
+	public inline function setVector4(pos:Int, v:Vector3D) {
 		setFloat(pos  , v.x);
 		setFloat(pos+1, v.y);
 		setFloat(pos+2, v.z);
 		setFloat(pos+3, v.w);
 	}
 
-	public function setMatrix4(pos:Int, v:Matrix3D) {
+	public inline function setMatrix4(pos:Int, v:Matrix3D) {
 		var a = v.rawData.__array;
 		for(i in 0...16) setFloat(pos+i, a[i]);
 	}

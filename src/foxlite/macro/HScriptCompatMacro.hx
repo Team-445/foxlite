@@ -24,8 +24,6 @@ class HScriptCompatMacro {
 			"openfl.display3D.Program3D",
 			"openfl.display3D.textures.TextureBase",
 			"openfl.display.BitmapData",
-			"openfl.display3D.IndexBuffer3D",
-			"openfl.display3D.VertexBuffer3D",
 			"openfl.display.ShaderParameter"
 		]) {
 			haxe.macro.Compiler.addGlobalMetadata(target, "@:allow(foxlite)", true, true, false);
@@ -54,7 +52,10 @@ class HScriptCompatMacro {
 			"foxlite.lights.FoxDirectionalLight",
 			"foxlite.loaders.FoxGLTFLoader",
 			"foxlite.animation.layering.FoxAddNode",
-			"foxlite.animation.layering.FoxSubtractNode"
+			"foxlite.animation.layering.FoxSubtractNode",
+			"foxlite.culling.BoundingBox",
+			"foxlite.culling.FrustumPlanes",
+			"foxlite.extras.FlxFox3DSprite"
 		]) {
 			haxe.macro.Compiler.addGlobalMetadata(fox, "@:build(foxlite.macro.HScriptCompatMacro.build_VectorAccess())", true, true, false);
 		}

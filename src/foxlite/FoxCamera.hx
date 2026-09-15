@@ -1,8 +1,11 @@
 package foxlite;
 
+import flixel.math.FlxPoint;
 import flixel.util.FlxColor;
 import foxlite.FoxLayer;
 import foxlite.animation.FoxLerp;
+import foxlite.culling.BoundingBox;
+import foxlite.culling.FrustumPlanes;
 import foxlite.lights.FoxLightData;
 import foxlite.math.FoxMathUtil;
 import foxlite.renderer.FoxRenderPass;
@@ -49,6 +52,13 @@ class FoxCamera extends FoxObject {
 	public var __invProjectionMatrix:Matrix3D = new Matrix3D(); // For raytracing effects
 
 	/**
+		Origin of the screen to where a perspective or isometric view would rotate
+	**/
+	public var projectionOrigin:FlxPoint = FlxPoint.get(0, 0);
+
+	var __lastProjectionOrigin:FlxPoint = FlxPoint.get(0, 0);
+
+	/**
 		This is the view matrix from a previous frame, used for motion vector calculations
 	**/
 	public var __prevViewMatrix:Matrix3D = new Matrix3D();
@@ -56,9 +66,17 @@ class FoxCamera extends FoxObject {
 	// Temporary matrix for space coordinate transforms
 	public final __tempMatrix = new Matrix3D();
 
-	// Frustum culling (TODO)
+	
+	/**
+		If enabled, this camera will calculate its frustum planes and determine
+		if models are inside it, culling what's outside the view and improving performance.
 
+		This is much needed for big worlds and/or small details that are not needed
+		when off-screen
+	**/
 	public var doFrustumCulling:Bool = true;
+
+	public var frustumPlanes:FrustumPlanes = new FrustumPlanes();
 
 	/**
 		The light data associated with this camera.
@@ -69,22 +87,21 @@ class FoxCamera extends FoxObject {
 		Normally, this is handled by the camera itself and the lights on the scene,
 		so you don't need to touch this unless you know what you're doing!
 	**/
-	public var lightData:FoxLightData = new FoxLightData();
+	public var lightData:FoxLightData;
 
 	/**
 		If set, this camera will use a custom environment
 	**/
 	public var environment:FoxEnvironment;
 
-	public function new(x:Float=0, y:Float=0, z:Float=0, _bgColor:FlxColor=0x0, ortho:Bool=false) {
+	public function new(x:Float=0, y:Float=0, z:Float=0, _bgColor:FlxColor=0x0, ortho:Bool=false, withLightData:Bool=true) {
 		super(x, y, z);
 		bgColor = _bgColor;
 		orthogonal = ortho;
 		name = "FoxCamera";
 		passes[0].useCameraColor = true;
+		if(withLightData) lightData = new FoxLightData();
 	}
-
-	public override function draw(camera:FoxCamera) {}
 
 	public override function update(dt:Float) {
 		super.update(dt);
@@ -93,7 +110,8 @@ class FoxCamera extends FoxObject {
 		if(FoxRenderer.calculateMotionVectors) __prevViewMatrix.copyRawDataFrom(viewMatrix.rawData);
 		FoxMathUtil.viewMatrixFromTransform(viewMatrix, transform);
 
-		if(__updateProjection) {
+		var updateOffset = !projectionOrigin.equals(__lastProjectionOrigin);
+		if(__updateProjection || updateOffset) {
 			__aspect = scene != null ? scene.__width / scene.__height : 1;
 			__aspect *= aspect;
 			
@@ -103,7 +121,29 @@ class FoxCamera extends FoxObject {
 			else {
 				FoxMathUtil.orthogonalMatrix(projectionMatrix, fov, __aspect, near, far);
 			}
-			
+
+			if(!projectionOrigin.isZero()) {
+				// shift like blender does
+				var sx = projectionOrigin.x;
+				var sy = projectionOrigin.y;
+
+				if(__aspect >= 1) sy *= __aspect;
+				else sx /= __aspect;
+				
+				if(!orthogonal) {
+					projectionMatrix.rawData.__array[8] = sx * 2;
+					projectionMatrix.rawData.__array[9] = sy * 2;
+				}
+				else {
+					projectionMatrix.rawData.__array[12] = sx * 2;
+					projectionMatrix.rawData.__array[13] = sy * 2;
+				}
+			}
+			if (updateOffset)
+				__lastProjectionOrigin.copyFrom(projectionOrigin);
+
+			if(doFrustumCulling) frustumPlanes.fromProjection(projectionMatrix);
+
 			__updateProjection = false;
 		}
 
@@ -138,7 +178,7 @@ class FoxCamera extends FoxObject {
 			}
 
 			// Do shadow pass for all shadow lights
-			pass.passShadowLights(lightData, this, drawGroups);
+			if(lightData != null) pass.passShadowLights(lightData, this, drawGroups);
 			
 			// Do normal render pass
 			pass.pass(this, drawGroups, framebuffer);
@@ -148,7 +188,11 @@ class FoxCamera extends FoxObject {
 	public override function destroy() {
 		transform = null;
 		projectionMatrix = null;
-		lightData.destroy();
+		lightData?.destroy();
+		projectionOrigin?.put();
+		projectionOrigin = null;
+		__lastProjectionOrigin?.put();
+		__lastProjectionOrigin = null;
 		super.destroy();
 	}
 
@@ -168,19 +212,28 @@ class FoxCamera extends FoxObject {
 		return v;
 	}
 
-	public function toFlixelScreenPoint(point:Vector3D, screenWidth:Float, screenHeight:Float, ?output:Vector2):Vector2 {
+	public function toFlixelScreenPoint(point:Vector3D, screenWidth:Float, screenHeight:Float, ?output:FlxPoint):FlxPoint {
 		final HW = screenWidth*.5;
 		final HH = screenHeight*.5;
 
 		if(output == null) {
-			output = new Vector2();
+			output = FlxPoint.get(0, 0);
 			FoxRenderer.allocationsThisFrame += 1;
 		}
-		output.setTo(
+		output.set(
 			HW + point.x * HW,
 			screenHeight - (HH + point.y * HH)
 		);
 		return output;
+	}
+
+	/**
+		Shortcut method, calls `getScreenPoint()` and then `toFlixelScreenPoint()`
+
+		Also returns a `FlxPoint instead`
+	**/
+	public inline function getFlixelScreenPoint(position:Vector3D, screenWidth:Float, screenHeight:Float):FlxPoint {
+		return toFlixelScreenPoint(getScreenPoint(position), screenWidth, screenHeight);
 	}
 
 	/**

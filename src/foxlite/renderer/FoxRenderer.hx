@@ -3,15 +3,19 @@ package foxlite.renderer;
 import EReg;
 import Reflect;
 import StringTools;
+import StringBuf;
 import haxe.ds.StringMap;
 import foxlite.FoxCache;
 import foxlite.FoxShader;
+import foxlite.culling.BoundingBox;
 import foxlite.instancing.FoxInstanceData;
 import foxlite.lights.FoxLightData;
 import foxlite.material.FoxBlendMode;
 import foxlite.material.FoxMaterial;
 import foxlite.math.FoxMathUtil;
 import foxlite.mesh.FoxMesh;
+import foxlite.mesh.buffer.FoxVertexBufferType;
+import foxlite.mesh.buffer.FoxVertexBuffer;
 import foxlite.polyfill.VectorFactory;
 import foxlite.flixel.FlxTypedSignalImpl;
 import foxlite.system.Int32BufferCache;
@@ -20,6 +24,7 @@ import foxlite.texture.FoxFramebuffer;
 import foxlite.texture.FoxFramebufferCubemap;
 import foxlite.texture.FoxTexture;
 import foxlite.texture.FoxTextureFilter;
+import foxlite.texture.FoxMipFilter;
 import foxlite.texture.FoxWrapMode;
 import foxlite.polyfill.TypedArray;
 
@@ -28,7 +33,6 @@ import lime.utils.DataPointer;
 import lime.utils.Float32Array;
 import openfl.display3D.Context3D;
 import openfl.display3D.Program3D;
-import openfl.display3D.VertexBuffer3D;
 import openfl.display3D.textures.CubeTexture;
 import openfl.display3D.textures.Texture;
 import openfl.geom.Rectangle;
@@ -37,11 +41,21 @@ import flixel.FlxG;
 import lime.utils.DataPointer;
 #end
 
+typedef FoxGLExtensions = {
+	?anisotropic:Dynamic,
+	?drawBuffersEXT:Dynamic, // WebGL 1
+	?depthTexture:Dynamic,
+	?textureFloat:Dynamic,
+	?textureHalfFloat:Dynamic,
+	?elementIndexUint:Dynamic, // WebGL 1
+	?instancedArrays:Dynamic // WebGL 1 / ES 2
+};
+
 // TODO: Make this a singleton so we don't use this many static vars
 class FoxRenderer {
 
 	public static final BUILD_NAME = "Beta";
-	public static final VERSION = "0.1.1";
+	public static final VERSION = "0.2.1";
 
 	public static var frameCount:Int = 0;
 	public static var drawCalls:Int = 0;
@@ -66,6 +80,8 @@ class FoxRenderer {
 	public static var __indexBuffer:Dynamic = null;
 
 	public static var renderMode:Int = GL.TRIANGLES;
+	public static var maxAnisotropy:Int = 0;
+	public static var extensions:FoxGLExtensions = {};
 
 	/**
 		If true, all scenes __must__ rebuild their draw groups.
@@ -95,6 +111,12 @@ class FoxRenderer {
 		This technique might require a bit more memory since previous transfomation matrices are stored in memory for each object.
 	**/
 	public static var calculateMotionVectors:Bool = false;
+
+	/**
+		If enabled, raw buffer data loaded from models will be stored in `FoxVertexBuffer`s, allowing you to modify them
+		and upload them to the GPU
+	**/
+	public static var preserveGLBufferData:Bool = false;
 
 	/**
 		If greater than 0, forces the renderer to render using `GL.LINES` with the specified width
@@ -136,29 +158,56 @@ class FoxRenderer {
 		trace(BUILD_NAME, VERSION, renderContext, frameCount, drawCalls, verticesDrawn, stateSwitches, __blendMode, 
 			__depthTest, __shader, __stencilTest, renderMode, debugWireframe, mustRebuildDrawGroups, 
 			renderedInstances, onPreDraw, onPostDraw, __indexBuffer, __scissorTest, glDeviceName, MISSING_TEXTURE, 
-			MISSING_MATERIAL, MISSING_SHADER, initialized, __target, calculateMotionVectors
+			MISSING_MATERIAL, MISSING_SHADER, initialized, __target, calculateMotionVectors, extensions, maxAnisotropy
 		);
 		#end
 		
 		FoxRenderer.renderContext = '${window.context.type}'.toUpperCase();
 		FoxRenderer.glDeviceName = gl.getParameter(gl.RENDERER);
-		trace('[FoxLite > FoxRenderer]: lime is ${renderContext}:\n    - Shader model: ${GL.getParameter(context.gl.SHADING_LANGUAGE_VERSION)}\n    - Device: $glDeviceName');
+		trace('[FoxLite > FoxRenderer]: lime is ${renderContext} (${Std.string(GL.context)}):\n    - Shader model: ${GL.getParameter(context.gl.SHADING_LANGUAGE_VERSION)}\n    - Device: $glDeviceName');
 	
 		// Activate extensions
-		var ext;
-		ext = GL.getExtension("ARB_draw_buffers")
-		??	  GL.getExtension("EXT_draw_buffers")
-		?? 	  GL.getExtension("WEBGL_draw_buffers")
-		?? 	  GL.getExtension("WEBGL_depth_texture"); // Allow the use of gl.DEPTH_STENCIL_ATTACHMENT
+		extensions.drawBuffersEXT = GL.getExtension("ARB_draw_buffers")
+								 ?? GL.getExtension("EXT_draw_buffers")
+								 ?? GL.getExtension("WEBGL_draw_buffers");
 
-		ext = GL.getExtension("EXT_texture_filter_anisotropic")
-  		??	  GL.getExtension("MOZ_EXT_texture_filter_anisotropic")
-  		??	  GL.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
+		extensions.depthTexture = GL.getExtension("WEBGL_depth_texture"); // Allow the use of gl.DEPTH_STENCIL_ATTACHMENT
 
-		trace('[FoxLite > FoxRenderer]: Texture Anisotropy ${ext == null ?  "not" : "is"} supported.');
+		extensions.anisotropic = GL.getExtension("EXT_texture_filter_anisotropic")
+  							  ?? GL.getExtension("MOZ_EXT_texture_filter_anisotropic")
+  							  ?? GL.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
+
+		if(extensions.anisotropic != null) {
+			maxAnisotropy = GL.getParameter(extensions.anisotropic.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+		}
+
+		// Those don't really return anything but we keep them in the object for tracking our extensions
+		extensions.textureFloat = GL.getExtension("OES_texture_float")
+							   ?? GL.getExtension("ARB_texture_float");
+
+		extensions.textureHalfFloat = GL.getExtension("OES_texture_half_float")
+								   ?? GL.getExtension("ARB_half_float_pixel")
+								   ?? GL.getExtension("ARB_half_float_vertex");
+
+		extensions.elementIndexUint = GL.getExtension("OES_element_index_uint");
+
+		extensions.instancedArrays = GL.getExtension("EXT_instanced_arrays")
+								  ?? GL.getExtension("ARB_instanced_arrays")
+								  ?? GL.getExtension("ANGLE_instanced_arrays");
+
+		trace('[FoxLite > FoxRenderer]: Texture Anisotropy ${extensions.anisotropic == null ?  "not" : "is"} supported.');
+
+		var extTxt = new StringBuf();
+		extTxt.add("Active Extensions: ");
+		for(extName in Reflect.fields(extensions)) {
+			var ext = Reflect.field(extensions, extName);
+			if(ext != null) extTxt.add('${Std.string(ext)}  ');
+		}
+		trace(extTxt.toString());
 
 		// Initialize missing texture
 		MISSING_TEXTURE = FoxTexture.create(2, 2, "rgba", "UNSIGNED_SHORT_4_4_4_4");
+		MISSING_TEXTURE.assetsKey = "Missing texture";
 		MISSING_TEXTURE.filter = FoxTextureFilter.NEAREST;
 		MISSING_TEXTURE.wrapMode = FoxWrapMode.REPEAT;
 
@@ -266,6 +315,10 @@ class FoxRenderer {
 		VectorFactory.staticInit();
 		FoxLightData.staticInit();
 		FoxShader.staticInit();
+		#if foxlite_polymod
+		trace(BoundingBox.__tempBounds);
+		trace(BoundingBox.__tempBounds2);
+		#end
 	}
 
 	/*
@@ -380,18 +433,13 @@ class FoxRenderer {
 	public static function useTexture(sampler:Int, texture:FoxTexture) {
 		var gl = context.gl;
 		var glTexture = texture.glTexture;
-		context.setTextureAt(sampler, glTexture);
-		context.setSamplerStateAt(sampler, cast texture.wrapMode, cast texture.filter, 
-			cast texture.mipFilter);
-		// __flushGLTextures() but cut-down
-		glTexture.__setSamplerState(context.__state.samplerStates[sampler]);
+		
 		GL.activeTexture(gl.TEXTURE0 + sampler);
+		GL.bindTexture(glTexture.__textureTarget, glTexture.__textureID);
 
-		if(glTexture.__textureTarget == gl.TEXTURE_2D) {
-			context.__bindGLTexture2D(glTexture.__textureID);
-		}
-		else if(glTexture.__textureTarget == gl.TEXTURE_CUBE_MAP) {
-			context.__bindGLTextureCubeMap(glTexture.__textureID);
+		if(texture.__paramsNeedUpdate) {
+			FoxRenderer.setTextureParameters(texture);
+			texture.__paramsNeedUpdate = false;
 		}
 	}
 
@@ -404,13 +452,104 @@ class FoxRenderer {
 			// Missing texture check
 			if(tex?.glTexture == null) tex = FoxRenderer.MISSING_TEXTURE;
 
-			context.setTextureAt(sampler, tex.glTexture);
-			context.setSamplerStateAt(sampler, cast tex.wrapMode, cast tex.filter, cast tex.mipFilter);
+			useTexture(sampler, tex);
 			GL.uniform1i(cast t.location, sampler);
 			sampler += 1;
 		}
 		FoxRenderer.stateSwitches += sampler;
 		return sampler;
+	}
+
+	/**
+		Sets the bound texture parameters, this also sets anisotropy if specified.
+
+		__Note:__ This will not generate mipmaps on its own, instead call `texture.generateMipmaps()` if
+		you are going to use mipmap filtering
+	**/
+	// from OpenFL, but better.
+	public static function setTextureParameters(texture:FoxTexture) {
+		var gl = context.gl;
+		var target = texture.glTexture.__textureTarget;
+		var wrapModeS = 0, wrapModeT = 0;
+
+		switch(texture.wrapMode) {
+			case FoxWrapMode.CLAMP: {
+				wrapModeS = gl.CLAMP_TO_EDGE;
+				wrapModeT = gl.CLAMP_TO_EDGE;
+			};
+			case FoxWrapMode.CLAMP_U_REPEAT_V: {
+				wrapModeS = gl.CLAMP_TO_EDGE;
+				wrapModeT = gl.REPEAT;
+			};
+			case FoxWrapMode.REPEAT: {
+				wrapModeS = gl.REPEAT;
+				wrapModeT = gl.REPEAT;
+			};
+			case FoxWrapMode.REPEAT_U_CLAMP_V: {
+				wrapModeS = gl.REPEAT;
+				wrapModeT = gl.CLAMP_TO_EDGE;
+			};
+			case FoxWrapMode.MIRROR: {
+				wrapModeS = 0x8370; // GL_MIRRORED_REPEAT
+				wrapModeT = 0x8370; // GL_MIRRORED_REPEAT
+			};
+			case FoxWrapMode.MIRROR_U_CLAMP_V: {
+				wrapModeS = 0x8370; // GL_MIRRORED_REPEAT
+				wrapModeT = gl.CLAMP_TO_EDGE;
+			};
+			case FoxWrapMode.CLAMP_U_MIRROR_V: {
+				wrapModeS = gl.CLAMP_TO_EDGE;
+				wrapModeT = 0x8370; // GL_MIRRORED_REPEAT
+			};
+			case FoxWrapMode.MIRROR_U_REPEAT_V: {
+				wrapModeS = 0x8370; // GL_MIRRORED_REPEAT
+				wrapModeT = gl.REPEAT;
+			};
+			case FoxWrapMode.REPEAT_U_MIRROR_V: {
+				wrapModeS = gl.REPEAT;
+				wrapModeT = 0x8370; // GL_MIRRORED_REPEAT
+			};
+			default: throw "wrap bad enum";
+		}
+
+		var magFilter = 0, minFilter = 0;
+
+		switch(texture.filter) {
+			case FoxTextureFilter.NEAREST:
+				magFilter = gl.NEAREST;
+			default:
+				magFilter = gl.LINEAR;
+		}
+
+		switch(texture.mipFilter) {
+			case FoxMipFilter.MIPLINEAR:
+				minFilter = texture.filter == FoxTextureFilter.NEAREST ? gl.NEAREST_MIPMAP_LINEAR : gl.LINEAR_MIPMAP_LINEAR;
+			case FoxMipFilter.MIPNEAREST:
+				minFilter = texture.filter == FoxTextureFilter.NEAREST ? gl.NEAREST_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_NEAREST;
+			case FoxMipFilter.MIPNONE:
+				minFilter = texture.filter == FoxTextureFilter.NEAREST ? gl.NEAREST : gl.LINEAR;
+			default:
+				throw "mipfiter bad enum";
+		}
+
+		gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, minFilter);
+		gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, magFilter);
+		gl.texParameteri(target, gl.TEXTURE_WRAP_S, wrapModeS);
+		gl.texParameteri(target, gl.TEXTURE_WRAP_T, wrapModeT);
+
+		var aniso:Float = switch(texture.filter) {
+			case FoxTextureFilter.ANISOTROPIC2X: 2;
+			case FoxTextureFilter.ANISOTROPIC4X: 4;
+			case FoxTextureFilter.ANISOTROPIC8X: 8;
+			case FoxTextureFilter.ANISOTROPIC16X: 16;
+			default: 1;
+		}
+		if(extensions.anisotropic != null) {
+			if(aniso > maxAnisotropy) aniso = maxAnisotropy;
+			gl.texParameterf(target, extensions.anisotropic.TEXTURE_MAX_ANISOTROPY_EXT, aniso);
+		}
+
+		if(texture.mipFilter != FoxMipFilter.MIPNONE) gl.generateMipmap(target);
 	}
 
 	/**
@@ -475,7 +614,7 @@ class FoxRenderer {
 		context.__flushGLDepth();
 		//context.__flushGLScissor();
 		//
-		context.__flushGLTextures(); // This reallocates sampler states internally and activates/binds texture units
+		//context.__flushGLTextures(); // This reallocates sampler states internally and activates/binds texture units
 
 		// Actual depth test here
 		if(FoxRenderer.__depthTest != material.depthTest) {
@@ -554,7 +693,7 @@ class FoxRenderer {
 		}
 		context.__flushGLCulling(); 
 		context.__flushGLDepth();
-		context.__flushGLTextures();
+		//context.__flushGLTextures();
 
 		FoxRenderer.stateSwitches += 1;
 		return sampler;
@@ -564,37 +703,38 @@ class FoxRenderer {
 		Renders a mesh, simple as that! Render pipeline must be set up for this.
 	**/
 	public static function drawMesh(context:Context3D, mesh:FoxMesh, shader:FoxShader) {
-		@:privateAccess var elements:Int = mesh.indexBuffer.__numIndices; // How many vertices we are drawing
+		final indexBuffer = mesh.buffers[FoxVertexBufferType.INDICES];
+		var elements = indexBuffer?.count ?? 0;
 		if(elements == 0) return;
 		var gl = context.gl;
 		var attrib = shader.attribIdx;
 
 		// Attributes
-		context.setVertexBufferAt(attrib.position, mesh.vertexBuffer, 0, cast 3);
-		if(attrib.texCoord != -1) context.setVertexBufferAt(attrib.texCoord, mesh.uvBuffer, 0, cast 2);
-		
+		FoxRenderer.setAttributePointerAt(attrib.position, mesh.buffers[FoxVertexBufferType.VERTICES]);
+		if(attrib.texCoord != -1) 
+			FoxRenderer.setAttributePointerAt(attrib.texCoord, mesh.buffers[FoxVertexBufferType.UVS]);
+
 		if(attrib.normal != -1) {
-			context.setVertexBufferAt(attrib.normal, mesh.normalBuffer, 0, cast 3);		
-			context.setVertexBufferAt(attrib.tangent, mesh.tangentBuffer, 0);
+			FoxRenderer.setAttributePointerAt(attrib.normal, mesh.buffers[FoxVertexBufferType.NORMALS]);
+			FoxRenderer.setAttributePointerAt(attrib.tangent, mesh.buffers[FoxVertexBufferType.TANGENTS]);
 		}
 
-		if(attrib.color != -1) context.setVertexBufferAt(attrib.color, mesh.colorBuffer, 0);
+		if(attrib.tangent != -1)
+			FoxRenderer.setAttributePointerAt(attrib.tangent, mesh.buffers[FoxVertexBufferType.TANGENTS]);
 
-		// Skinning
-		if(attrib.boneWeight != -1) context.setVertexBufferAt(attrib.boneWeight, mesh.boneWeights, 0);
-		if(attrib.boneIndex != -1) switch(mesh.boneIndices?.__stride ?? -1) {
-			case 4: FoxRenderer.vertexAtrribPtrUByte(context, attrib.boneIndex, mesh.boneIndices); // Unsigned Byte
-			case 8: FoxRenderer.vertexAtrribPtrUShort(context, attrib.boneIndex, mesh.boneIndices); // Unsigned Short
-			default: {
-				GL.disableVertexAttribArray(attrib.boneIndex);
-				context.__bindGLArrayBuffer(null);
-			}
-		}
+		if(attrib.color != -1)
+			FoxRenderer.setAttributePointerAt(attrib.color, mesh.buffers[FoxVertexBufferType.COLORS]);
+
+		if(attrib.boneWeight != -1)
+			FoxRenderer.setAttributePointerAt(attrib.boneWeight, mesh.buffers[FoxVertexBufferType.WEIGHTS]);
+
+		if(attrib.boneIndex != -1)
+			FoxRenderer.setAttributePointerAt(attrib.boneIndex, mesh.buffers[FoxVertexBufferType.BONE_INDICES]);
 
 		// Draw things the OpenGL way
 		@:privateAccess // Shut up haxe everything is okay
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer.__id);
-		gl.drawElements(FoxRenderer.renderMode, elements, gl.UNSIGNED_SHORT, 0);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.id);
+		gl.drawElements(FoxRenderer.renderMode, elements, indexBuffer.type, 0);
 		
 		FoxRenderer.drawCalls += 1;
 		FoxRenderer.verticesDrawn += elements;
@@ -609,56 +749,54 @@ class FoxRenderer {
 		__Note 2:__ Instancing operations only works in OpenGL 3.0+
 	**/
 	public static function drawMeshInstanced(context:Context3D, mesh:FoxMesh, shader:FoxShader, count:Int, instanceData:FoxInstanceData) {
-		@:privateAccess var elements:Int = mesh.indexBuffer.__numIndices; // How many vertices we are drawing
+		final indexBuffer = mesh.buffers[FoxVertexBufferType.INDICES];
+		var elements = indexBuffer?.count ?? 0;
 		if(elements == 0) return;
 		var gl = context.gl;
 		var attrib = shader.attribIdx;
 
 		// Attributes
-		context.setVertexBufferAt(attrib.position, mesh.vertexBuffer, 0, cast 3);
-		if(attrib.texCoord != -1) context.setVertexBufferAt(attrib.texCoord, mesh.uvBuffer, 0, cast 2);
-		
+		FoxRenderer.setAttributePointerAt(attrib.position, mesh.buffers[FoxVertexBufferType.VERTICES]);
+		if(attrib.texCoord != -1) 
+			FoxRenderer.setAttributePointerAt(attrib.texCoord, mesh.buffers[FoxVertexBufferType.UVS]);
+
 		if(attrib.normal != -1) {
-			context.setVertexBufferAt(attrib.normal, mesh.normalBuffer, 0, cast 3);		
-			context.setVertexBufferAt(attrib.tangent, mesh.tangentBuffer, 0);
+			FoxRenderer.setAttributePointerAt(attrib.normal, mesh.buffers[FoxVertexBufferType.NORMALS]);
+			FoxRenderer.setAttributePointerAt(attrib.tangent, mesh.buffers[FoxVertexBufferType.TANGENTS]);
 		}
 
-		if(attrib.color != -1) context.setVertexBufferAt(attrib.color, mesh.colorBuffer, 0);
+		if(attrib.color != -1)
+			FoxRenderer.setAttributePointerAt(attrib.color, mesh.buffers[FoxVertexBufferType.COLORS]);
 
-		// Skinning
-		if(attrib.boneWeight != -1) context.setVertexBufferAt(attrib.boneWeight, mesh.boneWeights, 0);
-		if(attrib.boneIndex != -1) switch(mesh.boneIndices?.__stride ?? -1) {
-			case 4: FoxRenderer.vertexAtrribPtrUByte(context, attrib.boneIndex, mesh.boneIndices); // Unsigned Byte
-			case 8: FoxRenderer.vertexAtrribPtrUShort(context, attrib.boneIndex, mesh.boneIndices); // Unsigned Short
-			default: {
-				GL.disableVertexAttribArray(attrib.boneIndex);
-				context.__bindGLArrayBuffer(null);
-			}
-		}
+		if(attrib.boneWeight != -1)
+			FoxRenderer.setAttributePointerAt(attrib.boneWeight, mesh.buffers[FoxVertexBufferType.WEIGHTS]);
+
+		if(attrib.boneIndex != -1)
+			FoxRenderer.setAttributePointerAt(attrib.boneIndex, mesh.buffers[FoxVertexBufferType.BONE_INDICES]);
 
 		// Instance data
 		var ID = attrib.instanceData;
 		
 		if(ID.data0 != -1) {
-			context.setVertexBufferAt(ID.data0, instanceData.column0.glBuffer, 0);
+			FoxRenderer.setAttributePointerAt(ID.data0, instanceData.column0.glBuffer);
 			GL.vertexAttribDivisor(ID.data0, 1);
 
-			context.setVertexBufferAt(ID.data1, instanceData.column1.glBuffer, 0);
+			FoxRenderer.setAttributePointerAt(ID.data1, instanceData.column1.glBuffer);
 			GL.vertexAttribDivisor(ID.data1, 1);
 
-			context.setVertexBufferAt(ID.data2, instanceData.column2.glBuffer, 0);
+			FoxRenderer.setAttributePointerAt(ID.data2, instanceData.column2.glBuffer);
 			GL.vertexAttribDivisor(ID.data2, 1);
 		}
 		
 		if(ID.color != -1) {
-			context.setVertexBufferAt(ID.color, instanceData.color.glBuffer, 0);
+			FoxRenderer.setAttributePointerAt(ID.color, instanceData.color.glBuffer);
 			GL.vertexAttribDivisor(ID.color, 1);
 		}
 
 		// Draw things the OpenGL way
 		@:privateAccess // Shut up haxe everything is okay
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer.__id);
-		GL.drawElementsInstanced(FoxRenderer.renderMode, elements, gl.UNSIGNED_SHORT, 0, count);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.id);
+		GL.drawElementsInstanced(FoxRenderer.renderMode, elements, indexBuffer.type, 0, count);
 		
 		// Restore state, else everything will be void
 		
@@ -684,7 +822,11 @@ class FoxRenderer {
 		gl.enable(gl.BLEND);
 		gl.blendEquation(gl.FUNC_ADD);
 		
-		gl.blendFuncSeparate(context.__getGLBlend(cachedState.blendSourceRGBFactor), context.__getGLBlend(cachedState.blendDestinationAlphaFactor), gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+		gl.blendFuncSeparate(
+			context.__getGLBlend(cachedState.blendSourceRGBFactor), 
+			context.__getGLBlend(cachedState.blendDestinationAlphaFactor), 
+			context.__getGLBlend(cachedState.blendSourceAlphaFactor),
+			context.__getGLBlend(cachedState.blendDestinationAlphaFactor));
 	}
 
 	public static function setBlendMode(context:Context3D, blendMode:Int) {
@@ -765,10 +907,6 @@ class FoxRenderer {
 
 		// Create texture with our format to be bound to a framebuffer
 
-		// Note: For gl.FLOAT formats in WebGL, OES_texture_float extensions MUST be enabled!!!
-		gl.getExtension("OES_texture_float");
-		gl.getExtension("OES_texture_half_float");
-
 		var data = FoxRenderer.getTextureFormat(format);
 		var type = Reflect.field(gl, type.toUpperCase());
 
@@ -798,9 +936,6 @@ class FoxRenderer {
 		// Now setup our texture
 		tex.__width = size;
 		tex.__height = size;
-
-		gl.getExtension("OES_texture_float");
-		gl.getExtension("OES_texture_half_float");
 
 		var data = FoxRenderer.getTextureFormat(format);
 		var type = Reflect.field(gl, type.toUpperCase());
@@ -924,40 +1059,15 @@ class FoxRenderer {
 		}
 	}
 
-	public static function updateVertexBuffer(context:Context3D, buffer:VertexBuffer3D, data:Float32Array, offset:Int=0) {
-		var gl = context.gl;
-		offset *= 4;
-		context.__bindGLArrayBuffer(buffer.__id);
-		#if foxlite_polymod
-		#if lime_webgl
-		GL.bufferSubDataWEBGL(gl.ARRAY_BUFFER, offset, data);
-		#else
-		GL.bufferSubData(gl.ARRAY_BUFFER, offset, data.length*4, DataPointer.fromArrayBufferView(data));
-		#end
-		#else
-		gl.bufferSubData(gl.ARRAY_BUFFER, offset, data);
-		#end
-	}
-
-	public static function vertexAtrribPtrUByte(context:Context3D, index:Int, buffer:VertexBuffer3D, bufferOffet:Int=0) {
+	public static function setAttributePointerAt(index:Int, buffer:FoxVertexBuffer, bufferOffset:Int=0) {
+		if(index < 0) return;
 		if(buffer == null) {
 			GL.disableVertexAttribArray(index);
 			context.__bindGLArrayBuffer(null);
 			return;
 		}
-		context.__bindGLArrayBuffer(buffer.__id);
-		GL.enableVertexAttribArray(index); //  		     	       vvvvv literally just fixing this
-		GL.vertexAttribPointer(index, 4, context.gl.UNSIGNED_BYTE, false, buffer.__stride, bufferOffet);
-	}
-
-	public static function vertexAtrribPtrUShort(context:Context3D, index:Int, buffer:VertexBuffer3D, bufferOffet:Int=0) {
-		if(buffer == null) {
-			GL.disableVertexAttribArray(index);
-			context.__bindGLArrayBuffer(null);
-			return;
-		}
-		context.__bindGLArrayBuffer(buffer.__id);
+		context.__bindGLArrayBuffer(buffer.id);
 		GL.enableVertexAttribArray(index);
-		GL.vertexAttribPointer(index, 4, context.gl.UNSIGNED_SHORT, false, buffer.__stride, bufferOffet);
+		GL.vertexAttribPointer(index, buffer.components, buffer.type, buffer.normalized, buffer.stride, bufferOffset);
 	}
 }

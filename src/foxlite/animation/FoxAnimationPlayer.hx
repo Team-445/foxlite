@@ -81,15 +81,18 @@ class FoxAnimationPlayer extends FoxAnimationLinker {
 
 		@param library Either a single `FoxAnimation` or a `StringMap` containing multiple `FoxAnimation` for the player's library
 	**/
-	public function new(?library:Dynamic) {
+	public function new(?library:Any) {
 		super();
 		if(Std.isOfType(library, FoxAnimation)) addAnimation(library);
-		else if(library != null) for(anim in (library:Map<String, FoxAnimation>)) addAnimation(anim);
+		else if(Std.isOfType(library, StringMap)) for(anim in (library:StringMap<FoxAnimation>)) addAnimation(anim);
 		name = "FoxAnimationPlayer";
 	}
 
 	public override function update(dt:Float) {
-		if(curAnim == null || !playing) return;
+		if(curAnim == null || !playing) {
+			super.update(dt);
+			return;
+		}
 		
 		time = curAnim.loop ? FoxMathUtil.glslMod(time, curAnim.duration) : FoxMathUtil.glslClamp(time, 0, curAnim.duration);
 		var tDir = reverse ? -1 : 1;
@@ -162,6 +165,7 @@ class FoxAnimationPlayer extends FoxAnimationLinker {
 			if(track.type == FoxTrackType.FUNCTION && (frameChanged || continuousCall)) {
 				// For function track types we only need to call it
 				var arg:Array<Dynamic> = v0;
+				if(arg == null) continue;
 				var func = (cast track:FoxCallbackTrack).callbacks.get(arg[0]);
 				if(func != null) Reflect.callMethod(null, func, arg[1]);
 				else trace('Could not call "${arg[0]}"! For track "$trackName"');
@@ -233,9 +237,9 @@ class FoxAnimationPlayer extends FoxAnimationLinker {
 		This ensures the animation plays smoothly and doesn't hold onto a keyframe if they're too close together until the next frame.
 	**/
 	public function fineTune(data:FoxTrackData, frames:Array<FoxKeyframe<Any>>, time:Float, direction:Int, duration:Float):Int {
-		var len = frames.length;
+		var len = frames.length-1;
 		if(direction != 0) for(i in 0...len) {
-			var nextIndex = Std.int(FoxMathUtil.glslMod(data.frameIndex + direction, len));
+			var nextIndex = FoxMathUtil.glslClampInt(data.frameIndex + direction, 0, len);
 			var curTime = frames[data.frameIndex].time;
 			var nextTime = frames[nextIndex].time;
 
@@ -245,8 +249,7 @@ class FoxAnimationPlayer extends FoxAnimationLinker {
 			else {
 				var dir = FoxMathUtil.direction1D(time - curTime);
 				if(dir == 0) break;
-				data.frameIndex += dir;
-				data.frameIndex = Std.int(FoxMathUtil.glslMod(data.frameIndex, len));
+				data.frameIndex = FoxMathUtil.glslClampInt(data.frameIndex + dir, 0, len);
 			}
 		}
 		return data.frameIndex;
