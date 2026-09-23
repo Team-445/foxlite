@@ -93,7 +93,7 @@ class FoxTexture {
 	**/
 	public function resize(width:Int, height:Int):FoxTexture {
 		if(__format == null || __type == null) {
-			trace("[FoxLite > FoxTexture]: Wrapped/Loaded textures cannot be resized!!!");
+			FoxLog.log("FoxTexture", "Wrapped/Loaded textures cannot be resized!!!");
 			return this;
 		}
 		glTexture?.dispose();
@@ -160,7 +160,7 @@ class FoxTexture {
 		
 		var isDataUrl = StringTools.startsWith(name, "data:");
 		if(!Assets.exists(name) && !isDataUrl) {
-			trace('[Foxlite > FoxTexture]: Could not load image: ${name} (Not found.)');
+			FoxLog.log('FoxTexture', 'Could not load image: ${name} (Not found.)');
 			return null;
 		}
 
@@ -174,7 +174,7 @@ class FoxTexture {
 		}
 
 		if(data == null) {
-			trace('[Foxlite > FoxTexture]: Could not load image: ${name} (BitmapData error.)');
+			FoxLog.log('FoxTexture', 'Could not load image: ${name} (BitmapData error.)');
 			return null;
 		}
 
@@ -190,11 +190,11 @@ class FoxTexture {
 			foxTex = FoxTexture.wrapGL(tex);
 		}
 		else if(data.image == null) {
-			trace('[Foxlite > FoxTexture]: Could not load image: ${name} (Asset was found, but Image failed to create.)');
+			FoxLog.log('FoxTexture', 'Could not load image: ${name} (Asset was found, but Image failed to create.)');
 			return null;
 		}
 		else if(data.image.buffer == null) {
-			trace('[Foxlite > FoxTexture]: Could not load image: ${name} (Asset was found, but Buffer is non-existant.)');
+			FoxLog.log('FoxTexture', 'Could not load image: ${name} (Asset was found, but Buffer is non-existant.)');
 			return null;
 		}
 
@@ -205,7 +205,7 @@ class FoxTexture {
 		}
 		
 		foxTex.assetsKey = name;
-		trace("[FoxLite > FoxTexture]: Add texture to cache: " + (StringTools.startsWith(name, "data:") ? "<Base64URL_String>" : name));
+		FoxLog.log("FoxTexture", "Add texture to cache: " + (StringTools.startsWith(name, "data:") ? "<Base64URL_String>" : name));
 		FoxCache.textures().set(name, foxTex);
 		return foxTex;
 	}

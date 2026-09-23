@@ -134,11 +134,11 @@ class FoxGLTFLoader {
 
 		var gltfJson:Dynamic = FoxLoaderUtil.loadJSON(name);
 		if(gltfJson == null) {
-			trace('[FoxLite > FoxGLTFLoader]: Could not load $name (Not found.)');
+			FoxLog.log('FoxGLTFLoader', 'Could not load $name (Not found.)');
 			return null;
 		}
 		if(gltfJson.asset.version == null || gltfJson.asset.version < "2.0") {
-			trace('[FoxLite > FoxGLTFLoader]: GLTF version < 2.0 is not supported! ($name)');
+			FoxLog.log('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
 			return null;
 		}
 		gltfJson.assetsKey = name;
@@ -152,12 +152,12 @@ class FoxGLTFLoader {
 			if(!isDataUrl) {
 				if(!Assets.exists(bufPath)) {
 					buffers.push(null);
-					trace('[FoxLite > FoxGLTFLoader]: Warning! buffer $i not found! (Loading: $bufPath)');
+					FoxLog.warning('FoxGLTFLoader', 'Buffer $i not found! (Loading: $bufPath)');
 					continue;
 				}
 				buffer = Assets.getBytes(bufPath);
 				if(buffer == null) {
-					trace('[FoxLite > FoxGLTFLoader]: Warning! Could not load buffer $i! (Loading: $bufPath)');
+					FoxLog.warning('FoxGLTFLoader', 'Could not load buffer $i! (Loading: $bufPath)');
 					buffers.push(null);
 					continue;
 				}
@@ -170,7 +170,7 @@ class FoxGLTFLoader {
 		}
 
 		if(buffers.length != 0 && buffers.filter(f -> f == null).length == buffers.length) {
-			trace('[FoxLite > FoxGLTFLoader]: Could not load "$name". (All buffers are missing)');
+			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". (All buffers are missing)');
 			return null;
 		}
 
@@ -188,23 +188,23 @@ class FoxGLTFLoader {
 	public static function loadBinary(name:String, ?extraShaderFlags:Array<String>, ?customShaderPath:String):GLTFData {
 		var path = FoxLoaderUtil.filePath(name);
 		if(!Assets.exists(path)) {
-			trace('[FoxLite > FoxGLTFLoader]: Could not load "$name" (Not found.)');
+			FoxLog.log('FoxGLTFLoader', 'Could not load "$name" (Not found.)');
 			return null;
 		}
 		
 		var glb:ByteArray = Assets.getBytes(path);
 		if(glb == null) {
-			trace('[FoxLite > FoxGLTFLoader]: Could not load "$name" (Load error.)');
+			FoxLog.log('FoxGLTFLoader', 'Could not load "$name" (Load error.)');
 			return null;
 		}
 
 		// GLB header checks
 		if(glb.readUTFBytes(4) != "glTF") {
-			trace('[FoxLite > FoxGLTFLoader]: GLB header error! ($name)');
+			FoxLog.log('FoxGLTFLoader', 'GLB header error! ($name)');
 			return null;
 		}
 		if(glb.readUnsignedInt() < 2) {
-			trace('[FoxLite > FoxGLTFLoader]: GLTF version < 2.0 is not supported! ($name)');
+			FoxLog.log('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
 			return null;
 		}
 
@@ -214,7 +214,7 @@ class FoxGLTFLoader {
 		glb.position += 4; // Skip JSON header
 
 		if(glb.bytesAvailable < jsonLength) {
-			trace('[FoxLite > FoxGLTFLoader]: Could not load "$name". Not enough bytes for json chunk. (${glb.bytesAvailable} < $jsonLength)');
+			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for json chunk. (${glb.bytesAvailable} < $jsonLength)');
 			return null;
 		}
 
@@ -224,7 +224,7 @@ class FoxGLTFLoader {
 		glb.position += 4; // Skip BIN header
 
 		if(glb.bytesAvailable < binLength) {
-			trace('[FoxLite > FoxGLTFLoader]: Could not load "$name". Not enough bytes for binary buffer. (${glb.bytesAvailable} < $binLength)');
+			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for binary buffer. (${glb.bytesAvailable} < $binLength)');
 			return null;
 		}
 
@@ -305,7 +305,7 @@ class FoxGLTFLoader {
 					texture.wrapMode = params.wrapMode;
 					texture.filter = params.filter;
 					texture.mipFilter = params.mipFilter;
-					trace("[FoxLite > FoxGLTFLoader]: Add buffer texture to cache: " + texture.assetsKey);
+					FoxLog.log("FoxGLTFLoader", "Add buffer texture to cache: " + texture.assetsKey);
 					FoxCache.textures().set(directory + image.name, texture);
 
 					var view = bufferViews[image.bufferView];
@@ -442,7 +442,7 @@ class FoxGLTFLoader {
 						var view:Dynamic = bufferViews[accessor.bufferView];
 						var buffer:ByteArray = buffers[view.buffer];
 						if(buffer == null && accessor.sparse == null) {
-							trace('Warning! Buffer ${view.buffer} not found for mesh $i/$attrib, skipping!');
+							FoxLog.warning('Buffer ${view.buffer} not found for mesh $i/$attrib, skipping!');
 							skip = true;
 							break;
 						}
@@ -540,7 +540,7 @@ class FoxGLTFLoader {
 
 		// Cache parent indices
 		for(i=>node in nodes) if(Std.isOfType(node.children, Array)) for(c in (node.children:Array<Int>)) {
-			if(parent[c] != null) trace('Warning! node ${parent[c]} ($c) already has a parent!');
+			if(parent[c] != null) FoxLog.warning('Node ${parent[c]} ($c) already has a parent!');
 			parent[c] = i;
 		}
 
@@ -629,7 +629,7 @@ class FoxGLTFLoader {
 					var bufferOut:ByteArray = buffers[viewOut.buffer];
 
 					if(bufferIn == null || bufferOut == null) {
-						trace('Warning! Buffers ${viewIn.buffer} and/or ${viewOut.buffer} not found for animation track "${node.name}:$path", skipping!');
+						FoxLog.warning('Buffers ${viewIn.buffer} and/or ${viewOut.buffer} not found for animation track "${node.name}:$path", skipping!');
 						if(viewIn.buffer == viewOut.buffer) break;
 						else continue;
 					}
