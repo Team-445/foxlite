@@ -88,6 +88,9 @@ class FoxOBJLoader {
 		var minVertex:Vector3D = new Vector3D(1e7, 1e7, 1e7);
 		var maxVertex:Vector3D = new Vector3D(-1e7, -1e7, -1e7);
 
+		var minVertex:Vector3D = new Vector3D(1e7, 1e7, 1e7);
+		var maxVertex:Vector3D = new Vector3D(-1e7, -1e7, -1e7);
+
 		function finishMesh() {
 			curMesh?.setArrays(vertices, uvtData, indices, null, normals, colors, null, null, bigIndices);
 			if(curMesh != null) curMesh.bounds = new BoundingBox(minVertex, maxVertex);

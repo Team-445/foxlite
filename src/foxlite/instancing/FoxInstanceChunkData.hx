@@ -1,6 +1,7 @@
 package foxlite.instancing;
 
 import foxlite.mesh.buffer.FoxVertexBuffer;
+import foxlite.mesh.buffer.FoxVertexBuffer;
 import haxe.io.Bytes;
 import lime.utils.Float32Array;
 import openfl.display3D.Context3D;
@@ -39,10 +40,8 @@ class FoxInstanceChunkData {
 	public function reallocate(context:Context3D, size:Int) {
 		glBuffer?.dispose();
 		glBuffer = new FoxVertexBuffer(size, dataPerVertex, true); //context.createVertexBuffer(size, 4, cast 0);
-
-		var init:Array<Float> = [];
-		init.resize(size*dataPerVertex);
 		
+		buffer = new Float32Array(size*4);
 		buffer = new Float32Array(size*4);
 		#if js
 		// js handles bytes differently, we use this instead for Bytes.blit()
