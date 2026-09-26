@@ -29,9 +29,11 @@ class FoxOBJLoader {
 		@returns An Object containing an Array of meshes (with materials applied) and a Map containing the materials from the MTL file (if it exists).
 	**/
 	public static function load(name:String, ?extraShaderFlags:Array<String>, ?customShaderPath:String, ?meshFactory:(name:String)->FoxMesh):{meshes:Array<FoxMesh>, materials:Map<String, FoxMaterial>} {
+		final cacheKey:String = name + extraShaderFlags?.join(";") + customShaderPath;
+
 		// Check cache
-		if(FoxCache.meshes().exists(name)) {
-			var meshes = FoxCache.meshes().get(name);
+		if(FoxCache.meshes().exists(cacheKey)) {
+			var meshes = FoxCache.meshes().get(cacheKey);
 			var materials:Map<String, FoxMaterial> = new StringMap();
 			for(m in meshes) {
 				if(!materials.exists(m.material.name)) materials.set(m.material.name, m.material);
@@ -258,7 +260,7 @@ class FoxOBJLoader {
 		if(curMesh != null) curMesh.bounds = new BoundingBox(minVertex, maxVertex);
 		if(curMesh != null && curMesh.material == null) curMesh.material = FoxRenderer.MISSING_MATERIAL; // What happened to our material...
 
-		FoxCache.meshes().set(name, meshes);
+		FoxCache.meshes().set(cacheKey, meshes);
 
 		return {meshes: meshes, materials: materials};
 	}
