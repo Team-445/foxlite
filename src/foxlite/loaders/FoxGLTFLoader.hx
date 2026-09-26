@@ -48,8 +48,9 @@ import lime.utils.ArrayBufferView;
 import lime.math.Vector2;
 import lime.graphics.Image;
 import lime.system.Endian;
+import lime.system.ThreadPool;
+import lime.utils.Assets;
 
-import openfl.Assets;
 import openfl.geom.Vector3D;
 import openfl.geom.Matrix3D;
 import openfl.utils.ByteArray;
@@ -134,11 +135,11 @@ class FoxGLTFLoader {
 
 		var gltfJson:Dynamic = FoxLoaderUtil.loadJSON(name);
 		if(gltfJson == null) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load $name (Not found.)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load $name (Not found.)');
 			return null;
 		}
 		if(gltfJson.asset.version == null || gltfJson.asset.version < "2.0") {
-			FoxLog.log('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
+			FoxLog.warning('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
 			return null;
 		}
 		gltfJson.assetsKey = name;
@@ -170,7 +171,7 @@ class FoxGLTFLoader {
 		}
 
 		if(buffers.length != 0 && buffers.filter(f -> f == null).length == buffers.length) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". (All buffers are missing)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name". (All buffers are missing)');
 			return null;
 		}
 
@@ -188,23 +189,23 @@ class FoxGLTFLoader {
 	public static function loadBinary(name:String, ?extraShaderFlags:Array<String>, ?customShaderPath:String):GLTFData {
 		var path = FoxLoaderUtil.filePath(name);
 		if(!Assets.exists(path)) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name" (Not found.)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name" (Not found.)');
 			return null;
 		}
 		
 		var glb:ByteArray = Assets.getBytes(path);
 		if(glb == null) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name" (Load error.)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name" (Load error.)');
 			return null;
 		}
 
 		// GLB header checks
 		if(glb.readUTFBytes(4) != "glTF") {
-			FoxLog.log('FoxGLTFLoader', 'GLB header error! ($name)');
+			FoxLog.warning('FoxGLTFLoader', 'GLB header error! ($name)');
 			return null;
 		}
 		if(glb.readUnsignedInt() < 2) {
-			FoxLog.log('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
+			FoxLog.warning('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
 			return null;
 		}
 
@@ -214,7 +215,7 @@ class FoxGLTFLoader {
 		glb.position += 4; // Skip JSON header
 
 		if(glb.bytesAvailable < jsonLength) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for json chunk. (${glb.bytesAvailable} < $jsonLength)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for json chunk. (${glb.bytesAvailable} < $jsonLength)');
 			return null;
 		}
 
@@ -224,7 +225,7 @@ class FoxGLTFLoader {
 		glb.position += 4; // Skip BIN header
 
 		if(glb.bytesAvailable < binLength) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for binary buffer. (${glb.bytesAvailable} < $binLength)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for binary buffer. (${glb.bytesAvailable} < $binLength)');
 			return null;
 		}
 
@@ -294,34 +295,63 @@ class FoxGLTFLoader {
 					else params.wrapMode = FoxWrapMode.CLAMP;
 				}
 
+				image.name = name + ':' + (image.name ?? 'Image_${tex.source+1}');
+
 				var texture:FoxTexture = null;
 				if(!isBuffer) {
 					var imagePath = isDataUrl ? image.uri : StringTools.urlDecode(FoxLoaderUtil.filePath(directory + Std.string(image.uri)));
 					texture = FoxTexture.fromImageRaw(imagePath, mipmaps, cast 1, params) ?? FoxRenderer.MISSING_TEXTURE;
 				}
-				else if(!FoxCache.textures().exists(directory + image.name)) {
+				else if(!FoxCache.textures().exists(image.name)) {
 					texture = new FoxTexture();
-					texture.assetsKey = directory + image.name;
+					texture.assetsKey = image.name;
 					texture.wrapMode = params.wrapMode;
 					texture.filter = params.filter;
 					texture.mipFilter = params.mipFilter;
+
+					#if foxlite_verbose
 					FoxLog.log("FoxGLTFLoader", "Add buffer texture to cache: " + texture.assetsKey);
-					FoxCache.textures().set(directory + image.name, texture);
+					#end
+					FoxCache.textures().set(image.name, texture);
 
 					var view = bufferViews[image.bufferView];
 					var buffer = buffers[view.buffer];
 					var imageBytes = Bytes.alloc(view.byteLength);
 					imageBytes.blit(0, buffer, view.byteOffset, view.byteLength);
-					
-					Image.loadFromBytes(imageBytes).onComplete(image -> {
+
+					function onImageLoaded(image:Image) {
 						(imageBytes:ByteArray).clear();
 						if(image == null) return;
+
+						trace("[FoxLite > FoxGLTFLoader]: Add buffer texture to cache: " + texture.assetsKey);
+
 						// Upload image directly to the GPU
 						// This method is completely detached from openfl's BitmapData operations
 						// Unless we find a better method, we'll stick with this
-						texture.glTexture = FoxRenderer.createTextureStorage(image.width, image.height, image.transparent ? "rgba" : "rgb");
-						(cast texture.glTexture:Texture).uploadFromTypedArray(image.buffer.data);
-					});
+						function task() {
+							texture.glTexture = FoxRenderer.createTextureStorage(image.width, image.height, image.transparent ? "rgba" : "rgb");
+							(cast texture.glTexture:Texture).uploadFromTypedArray(image.buffer.data);
+						}
+						
+						if(FoxRenderer.forceSyncLoading)
+							task();
+						else 
+							FoxRenderer.runTaskAtNextDraw(task);
+					}
+
+					function onImageError(e:Dynamic) {
+						trace('[Foxlite > FoxGLTFLoader]: Could not create buffer texture: ${image.name} ($e)');
+						FoxCache.textures().remove(image.name);
+					}
+					
+					// If we're on the main thread, load it async, else lime's own thread pool system clashes with itself (bruh)
+					if(ThreadPool.isMainThread() && !FoxRenderer.forceSyncLoading) {
+						var future = Image.loadFromBytes(imageBytes);
+						future.onComplete(onImageLoaded);
+						future.onError(onImageError);
+					}
+					else
+						onImageLoaded(Image.fromBytes(imageBytes));
 				}
 				else texture = FoxCache.textures().get(directory + image.name);
 				textures.push(texture);
@@ -352,6 +382,9 @@ class FoxGLTFLoader {
 
 				if(Std.isOfType(mat.alphaCutoff, Float) || Std.isOfType(mat.alphaCutoff, Int))
 					material.alphaScissor = mat.alphaCutoff;
+
+				if(mat.alphaMode == "BLEND" && material.alphaScissor <= 0)
+					material.alphaScissor = 0.05;
 				
 				if(mat.emissiveTexture != null) {
 					addFlag("EMISSIVE_MAP");
@@ -373,8 +406,8 @@ class FoxGLTFLoader {
 
 				var pbr:Dynamic = mat.pbrMetallicRoughness;
 
-				if(pbr?.metallicFactor != null) material.setMetallic(pbr.metallicFactor);
-				if(pbr?.roughnessFactor != null) material.setRoughness(pbr.roughnessFactor);
+				material.setMetallic(pbr?.metallicFactor ?? 1);
+				material.setRoughness(pbr?.roughnessFactor ?? 1);
 
 				if(pbr?.baseColorFactor != null) {
 					var c = pbr?.baseColorFactor;

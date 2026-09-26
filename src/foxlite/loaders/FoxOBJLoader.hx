@@ -41,7 +41,7 @@ class FoxOBJLoader {
 
 		var obj = FoxLoaderUtil.loadText(name);
 		if(obj == null) {
-			FoxLog.log('FoxOBJLoader', 'Could not load OBJ: ${name} (Not found.)');
+			FoxLog.warning('FoxOBJLoader', 'Could not load OBJ: ${name} (Not found.)');
 			return null;
 		}
 
@@ -129,8 +129,8 @@ class FoxOBJLoader {
 				};
 				case 'usemtl': { // Set material
 					var material = materials?.get(data.join(' ')); // Join spaces since names can have them
-					if(material != null && __prevMesh == curMesh && __prevMesh?.material != null && curMesh?.material != null) {
-						FoxLog.warning('Material "${material.name}" tried to overwrite mesh material "${curMesh.material.name}". FoxLite does not support per-face materials, skipping!!');
+					if(__prevMesh == curMesh && __prevMesh?.material != null && curMesh?.material != null) {
+						FoxLog.warning('FoxOBJLoader', 'Material "${material.name}" tried to overwrite mesh material "${curMesh.material.name}". FoxLite does not support per-face materials, skipping!!');
 					}
 					else if (material != null) curMesh.material = material;
 					__prevMesh = curMesh;
