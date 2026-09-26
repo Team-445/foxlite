@@ -39,6 +39,8 @@ class BoundingBox {
 		This also moves the bounding box so the extents can be applied to the new volume
 	**/
 	public function expand(box:BoundingBox) {
+		if (box == null)
+			return;
 		if(extents.equals(FoxMathUtil.ZERO)) {
 			copyFrom(box);
 			return;
