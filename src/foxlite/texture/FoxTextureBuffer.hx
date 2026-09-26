@@ -112,7 +112,7 @@ class FoxTextureBuffer extends FoxTexture {
 		final typeString = "FLOAT";
 
 		if(formatString == "32F" || formatString == "") {
-			FoxLog.log("FoxTextureBuffer", "Invalid buffer format!");
+			FoxLog.warning("FoxTextureBuffer", "Invalid buffer format!");
 			return;
 		}
 

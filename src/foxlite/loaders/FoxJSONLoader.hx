@@ -58,7 +58,9 @@ class FoxJSONLoader {
 		for(model in modelData) {
 			var material:FoxMaterial = null;
 			if(model.material != null) {
+				#if foxlite_verbose
 				FoxLog.log("FoxJSONLoader", "Loading material file: " + model.material.split(":")[0]);
+				#end
 				material = FoxMaterial.fromJSON(path + model.material); // Adds to cache automatically
 				if(material == null) {
 					FoxLog.warning("FoxMaterial", "material not found!! " + model.material);

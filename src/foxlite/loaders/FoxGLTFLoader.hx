@@ -134,11 +134,11 @@ class FoxGLTFLoader {
 
 		var gltfJson:Dynamic = FoxLoaderUtil.loadJSON(name);
 		if(gltfJson == null) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load $name (Not found.)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load $name (Not found.)');
 			return null;
 		}
 		if(gltfJson.asset.version == null || gltfJson.asset.version < "2.0") {
-			FoxLog.log('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
+			FoxLog.warning('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
 			return null;
 		}
 		gltfJson.assetsKey = name;
@@ -170,7 +170,7 @@ class FoxGLTFLoader {
 		}
 
 		if(buffers.length != 0 && buffers.filter(f -> f == null).length == buffers.length) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". (All buffers are missing)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name". (All buffers are missing)');
 			return null;
 		}
 
@@ -188,23 +188,23 @@ class FoxGLTFLoader {
 	public static function loadBinary(name:String, ?extraShaderFlags:Array<String>, ?customShaderPath:String):GLTFData {
 		var path = FoxLoaderUtil.filePath(name);
 		if(!Assets.exists(path)) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name" (Not found.)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name" (Not found.)');
 			return null;
 		}
 		
 		var glb:ByteArray = Assets.getBytes(path);
 		if(glb == null) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name" (Load error.)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name" (Load error.)');
 			return null;
 		}
 
 		// GLB header checks
 		if(glb.readUTFBytes(4) != "glTF") {
-			FoxLog.log('FoxGLTFLoader', 'GLB header error! ($name)');
+			FoxLog.warning('FoxGLTFLoader', 'GLB header error! ($name)');
 			return null;
 		}
 		if(glb.readUnsignedInt() < 2) {
-			FoxLog.log('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
+			FoxLog.warning('FoxGLTFLoader', 'GLTF version < 2.0 is not supported! ($name)');
 			return null;
 		}
 
@@ -214,7 +214,7 @@ class FoxGLTFLoader {
 		glb.position += 4; // Skip JSON header
 
 		if(glb.bytesAvailable < jsonLength) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for json chunk. (${glb.bytesAvailable} < $jsonLength)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for json chunk. (${glb.bytesAvailable} < $jsonLength)');
 			return null;
 		}
 
@@ -224,7 +224,7 @@ class FoxGLTFLoader {
 		glb.position += 4; // Skip BIN header
 
 		if(glb.bytesAvailable < binLength) {
-			FoxLog.log('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for binary buffer. (${glb.bytesAvailable} < $binLength)');
+			FoxLog.warning('FoxGLTFLoader', 'Could not load "$name". Not enough bytes for binary buffer. (${glb.bytesAvailable} < $binLength)');
 			return null;
 		}
 
@@ -305,7 +305,9 @@ class FoxGLTFLoader {
 					texture.wrapMode = params.wrapMode;
 					texture.filter = params.filter;
 					texture.mipFilter = params.mipFilter;
+					#if foxlite_verbose
 					FoxLog.log("FoxGLTFLoader", "Add buffer texture to cache: " + texture.assetsKey);
+					#end
 					FoxCache.textures().set(directory + image.name, texture);
 
 					var view = bufferViews[image.bufferView];

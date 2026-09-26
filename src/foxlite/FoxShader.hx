@@ -242,7 +242,9 @@ class FoxShader {
 				source = includes.replace(source, "// Skipped: " + file);
 				continue;
 			}
+			#if foxlite_verbose
 			FoxLog.log("FoxShader", "Including shader source: " + file);
+			#end
 
 			list.push(file);
 			var defPath = FoxLoaderUtil.shaderIncludeRoot(file);
@@ -275,13 +277,13 @@ class FoxShader {
 		
 		if(Assets.exists(vert)) vert = Assets.getText(vert);
 		else {
-			FoxLog.log('FoxShader', 'Vertex source not found for $vert');
+			FoxLog.warning('FoxShader', 'Vertex source not found for $vert');
 			vert = "";
 		}
 
 		if(Assets.exists(frag)) frag = Assets.getText(frag);
 		else {
-			FoxLog.log('FoxShader', 'Fragment source not found for $frag');
+			FoxLog.warning('FoxShader', 'Fragment source not found for $frag');
 			frag = "";
 		}
 
@@ -289,7 +291,9 @@ class FoxShader {
 
 		var shader = FoxShader.fromSources(vert, frag, flags);
 		shader.assetsKey = name;
+		#if foxlite_verbose
 		FoxLog.log("FoxShader", "Add shader to cache: " + name + defHash);
+		#end
 		FoxCache.shaders().set(name + defHash, shader);
 		return shader;
 	}
