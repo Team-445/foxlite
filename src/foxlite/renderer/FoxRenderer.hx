@@ -17,6 +17,7 @@ import foxlite.math.FoxMathUtil;
 import foxlite.mesh.FoxMesh;
 import foxlite.mesh.buffer.FoxVertexBufferType;
 import foxlite.mesh.buffer.FoxVertexBuffer;
+import foxlite.mesh.buffer.FoxVertexMultiBuffer;
 import foxlite.polyfill.VectorFactory;
 import foxlite.flixel.FlxTypedSignalImpl;
 import foxlite.system.Int32BufferCache;
@@ -28,10 +29,6 @@ import foxlite.texture.FoxTextureFilter;
 import foxlite.texture.FoxMipFilter;
 import foxlite.texture.FoxWrapMode;
 import foxlite.polyfill.TypedArray;
-
-#if lime_box3d
-import foxlite.physics.FoxPhysicsWorld;
-#end
 
 import lime.graphics.opengl.GL;
 import lime.utils.DataPointer;
@@ -158,6 +155,11 @@ class FoxRenderer {
 
 	public static final onPreDraw:FlxTypedSignalImpl<()->Void> = new FlxTypedSignalImpl();
 	public static final onPostDraw:FlxTypedSignalImpl<()->Void> = new FlxTypedSignalImpl();
+
+	/**
+		Called when `initLibs()` is called
+	**/
+	public static final onInit:FlxTypedSignalImpl<()->Void> = new FlxTypedSignalImpl();
 
 	public static final nextDrawTasks:List<()->Void> = new List();
 
@@ -346,6 +348,11 @@ class FoxRenderer {
 		
 		if(!FlxG.signals.preStateSwitch.has(FoxCache.cleanup)) 
 			FlxG.signals.preStateSwitch.add(FoxCache.cleanup);
+
+		#if mac
+		if(!FlxG.signals.postStateSwitch.has(__clearVAO))
+			FlxG.signals.postStateSwitch.add(__clearVAO);
+		#end
 	}
 
 	/**
@@ -368,12 +375,23 @@ class FoxRenderer {
 		#if foxlite_polymod
 		return FlxG.stage.window;
 		#else
-		return openfl.Lib.application.window;
+		return lime.app.Application.current.window;
 		#end
 	}
 
 	public inline static function getGLVersion() {
 		return getWindow().context.version;
+	}
+
+	public inline static function getGLSLVersion():String {
+		final e = new EReg('\\d\\.\\d', 'i');
+		if(e.match(GL.getParameter(context.gl.SHADING_LANGUAGE_VERSION))) {
+			var version:Int = Std.int(Math.max(Math.round(Std.parseFloat(e.matched(0))*100), 100));
+			var es = FoxRenderer.renderContext == "WEBGL" || StringTools.endsWith(FoxRenderer.renderContext, 'ES') ? 'es' : '';
+			if(version == 100) return '100'; // fallback
+			return '$version $es';
+		}
+		return '100';
 	}
 
 	/**
@@ -396,6 +414,7 @@ class FoxRenderer {
 		Initializes static classes
 	**/
 	public static function initLibs() {
+		if(FoxRenderer.initialized) return;
 		trace('---------------     Initializing Libs     ---------------');
 		FoxMathUtil.staticInit();
 		FoxCache.staticInit();
@@ -407,10 +426,7 @@ class FoxRenderer {
 		trace(BoundingBox.__tempBounds);
 		trace(BoundingBox.__tempBounds2);
 		#end
-
-		#if lime_box3d
-		FoxPhysicsWorld.staticInit();
-		#end
+		onInit.dispatch();
 		trace('--------------- Finished Initializing Libs ---------------');
 	}
 
@@ -446,7 +462,7 @@ class FoxRenderer {
 		context.setRenderToBackBuffer();
 		
 		// Default blending
-		FoxRenderer.setBlendMode(context, FoxBlendMode.MIX, true);
+		FoxRenderer.setBlendMode(context, FoxBlendMode.PREMULTIPLIED_ALPHA, true);
 		// No depth test (important!)
 		context.setDepthTest(false, cast 0);
 		context.setCulling(cast 3);
@@ -463,6 +479,10 @@ class FoxRenderer {
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, FoxRenderer.__indexBuffer);
 
 		FoxRenderer.mustRebuildDrawGroups = false;
+	}
+
+	public static function __clearVAO() {
+		if(__shader != null) for(i in 0...GL.getParameter(context.gl.MAX_VERTEX_ATTRIBS)) GL.disableVertexAttribArray(i);
 	}
 
 	/**
@@ -818,34 +838,36 @@ class FoxRenderer {
 	/**
 		Renders a mesh, simple as that! Render pipeline must be set up for this.
 	**/
-	public static function drawMesh(context:Context3D, mesh:FoxMesh, shader:FoxShader) {
-		final indexBuffer = mesh.buffers[FoxVertexBufferType.INDICES];
+	public static function drawMesh(context:Context3D, mesh:FoxMesh, shader:FoxShader, lod:Int=0) {
+		final buffers = mesh.getLod(lod);
+		if(buffers == null) return;
+		final indexBuffer = buffers[FoxVertexBufferType.INDICES];
 		var elements = indexBuffer?.count ?? 0;
 		if(elements == 0) return;
 		var gl = context.gl;
 		var attrib = shader.attribIdx;
 
 		// Attributes
-		FoxRenderer.setAttributePointerAt(attrib.position, mesh.buffers[FoxVertexBufferType.VERTICES]);
+		FoxRenderer.setAttributePointerAt(attrib.position, buffers[FoxVertexBufferType.VERTICES]);
 		if(attrib.texCoord != -1) 
-			FoxRenderer.setAttributePointerAt(attrib.texCoord, mesh.buffers[FoxVertexBufferType.UVS]);
+			FoxRenderer.setAttributePointerAt(attrib.texCoord, buffers[FoxVertexBufferType.UVS]);
 
 		if(attrib.normal != -1) {
-			FoxRenderer.setAttributePointerAt(attrib.normal, mesh.buffers[FoxVertexBufferType.NORMALS]);
-			FoxRenderer.setAttributePointerAt(attrib.tangent, mesh.buffers[FoxVertexBufferType.TANGENTS]);
+			FoxRenderer.setAttributePointerAt(attrib.normal, buffers[FoxVertexBufferType.NORMALS]);
+			FoxRenderer.setAttributePointerAt(attrib.tangent, buffers[FoxVertexBufferType.TANGENTS]);
 		}
 
 		if(attrib.tangent != -1)
-			FoxRenderer.setAttributePointerAt(attrib.tangent, mesh.buffers[FoxVertexBufferType.TANGENTS]);
+			FoxRenderer.setAttributePointerAt(attrib.tangent, buffers[FoxVertexBufferType.TANGENTS]);
 
 		if(attrib.color != -1)
-			FoxRenderer.setAttributePointerAt(attrib.color, mesh.buffers[FoxVertexBufferType.COLORS]);
+			FoxRenderer.setAttributePointerAt(attrib.color, buffers[FoxVertexBufferType.COLORS]);
 
 		if(attrib.boneWeight != -1)
-			FoxRenderer.setAttributePointerAt(attrib.boneWeight, mesh.buffers[FoxVertexBufferType.WEIGHTS]);
+			FoxRenderer.setAttributePointerAt(attrib.boneWeight, buffers[FoxVertexBufferType.WEIGHTS]);
 
 		if(attrib.boneIndex != -1)
-			FoxRenderer.setAttributePointerAt(attrib.boneIndex, mesh.buffers[FoxVertexBufferType.BONE_INDICES]);
+			FoxRenderer.setAttributePointerAt(attrib.boneIndex, buffers[FoxVertexBufferType.BONE_INDICES]);
 
 		// Draw things the OpenGL way
 		@:privateAccess // Shut up haxe everything is okay
@@ -864,49 +886,40 @@ class FoxRenderer {
 
 		__Note 2:__ Instancing operations only works in OpenGL 3.0+
 	**/
-	public static function drawMeshInstanced(context:Context3D, mesh:FoxMesh, shader:FoxShader, count:Int, instanceData:FoxInstanceData) {
-		final indexBuffer = mesh.buffers[FoxVertexBufferType.INDICES];
+	public static function drawMeshInstanced(context:Context3D, mesh:FoxMesh, shader:FoxShader, count:Int, instanceData:FoxInstanceData, lod:Int=0) {
+		final buffers = mesh.getLod(lod);
+		if(buffers == null) return;
+		final indexBuffer = buffers[FoxVertexBufferType.INDICES];
 		var elements = indexBuffer?.count ?? 0;
 		if(elements == 0) return;
 		var gl = context.gl;
 		var attrib = shader.attribIdx;
 
 		// Attributes
-		FoxRenderer.setAttributePointerAt(attrib.position, mesh.buffers[FoxVertexBufferType.VERTICES]);
+		FoxRenderer.setAttributePointerAt(attrib.position, buffers[FoxVertexBufferType.VERTICES]);
 		if(attrib.texCoord != -1) 
-			FoxRenderer.setAttributePointerAt(attrib.texCoord, mesh.buffers[FoxVertexBufferType.UVS]);
+			FoxRenderer.setAttributePointerAt(attrib.texCoord, buffers[FoxVertexBufferType.UVS]);
 
 		if(attrib.normal != -1) {
-			FoxRenderer.setAttributePointerAt(attrib.normal, mesh.buffers[FoxVertexBufferType.NORMALS]);
-			FoxRenderer.setAttributePointerAt(attrib.tangent, mesh.buffers[FoxVertexBufferType.TANGENTS]);
+			FoxRenderer.setAttributePointerAt(attrib.normal, buffers[FoxVertexBufferType.NORMALS]);
+			FoxRenderer.setAttributePointerAt(attrib.tangent, buffers[FoxVertexBufferType.TANGENTS]);
 		}
 
 		if(attrib.color != -1)
-			FoxRenderer.setAttributePointerAt(attrib.color, mesh.buffers[FoxVertexBufferType.COLORS]);
+			FoxRenderer.setAttributePointerAt(attrib.color, buffers[FoxVertexBufferType.COLORS]);
 
 		if(attrib.boneWeight != -1)
-			FoxRenderer.setAttributePointerAt(attrib.boneWeight, mesh.buffers[FoxVertexBufferType.WEIGHTS]);
+			FoxRenderer.setAttributePointerAt(attrib.boneWeight, buffers[FoxVertexBufferType.WEIGHTS]);
 
 		if(attrib.boneIndex != -1)
-			FoxRenderer.setAttributePointerAt(attrib.boneIndex, mesh.buffers[FoxVertexBufferType.BONE_INDICES]);
+			FoxRenderer.setAttributePointerAt(attrib.boneIndex, buffers[FoxVertexBufferType.BONE_INDICES]);
 
 		// Instance data
 		var ID = attrib.instanceData;
-		
-		if(ID.data0 != -1) {
-			FoxRenderer.setAttributePointerAt(ID.data0, instanceData.column0.glBuffer);
-			GL.vertexAttribDivisor(ID.data0, 1);
 
-			FoxRenderer.setAttributePointerAt(ID.data1, instanceData.column1.glBuffer);
-			GL.vertexAttribDivisor(ID.data1, 1);
-
-			FoxRenderer.setAttributePointerAt(ID.data2, instanceData.column2.glBuffer);
-			GL.vertexAttribDivisor(ID.data2, 1);
-		}
-		
-		if(ID.color != -1) {
-			FoxRenderer.setAttributePointerAt(ID.color, instanceData.color.glBuffer);
-			GL.vertexAttribDivisor(ID.color, 1);
+		if(ID != -1) {
+			FoxRenderer.setAttributePointerMultiAt(ID, instanceData.data, 4);
+			for(i in 0...4) GL.vertexAttribDivisor(ID+i, 1);
 		}
 
 		// Draw things the OpenGL way
@@ -916,12 +929,10 @@ class FoxRenderer {
 		
 		// Restore state, else everything will be void
 		
-		if(ID.data0 != -1) {
-			GL.vertexAttribDivisor(ID.data0, 0);
-			GL.vertexAttribDivisor(ID.data1, 0);
-			GL.vertexAttribDivisor(ID.data2, 0);
+		if(ID != -1) {
+			FoxRenderer.setAttributePointerMultiAt(ID, null, 4);
+			for(i in 0...4) GL.vertexAttribDivisor(ID+i, 0);
 		}
-		if(ID.color != -1) GL.vertexAttribDivisor(ID.color, 0);
 
 		FoxRenderer.drawCalls += 1;
 		FoxRenderer.verticesDrawn += elements*count;
@@ -1194,5 +1205,21 @@ class FoxRenderer {
 		context.__bindGLArrayBuffer(buffer.id);
 		GL.enableVertexAttribArray(index);
 		GL.vertexAttribPointer(index, buffer.components, buffer.type, buffer.normalized, buffer.stride, bufferOffset);
+	}
+
+	public static function setAttributePointerMultiAt(index:Int, buffer:FoxVertexMultiBuffer, regions:Int=1) {
+		if(index < 0) return;
+		if(buffer?.id == null) {
+			for(i in 0...regions) GL.disableVertexAttribArray(index+i);
+			context.__bindGLArrayBuffer(null);
+			return;
+		}
+		context.__bindGLArrayBuffer(buffer.id);
+		
+		for(i in 0...regions) {
+			var region = buffer.regions[i];
+			GL.enableVertexAttribArray(index+i);
+			GL.vertexAttribPointer(index+i, region.components, buffer.type, region.normalized, region.stride, region.offset);
+		}
 	}
 }

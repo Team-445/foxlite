@@ -58,6 +58,7 @@ class FoxShader {
 	public inline static final PRAGMA_SHADOW_PROGRAM = "#pragma shadow_program_check";
 	public inline static final PRAGMA_OPENGL3 = "#pragma opengl3";
 	public inline static final PRAGMA_OPENGL4 = "#pragma opengl4";
+	public inline static final PRAGMA_OPENGL_AUTO = "#pragma opengl";
 
 	// Based on OpenGL 3.2
 	// https://github.com/mattdesl/lwjgl-basics/wiki/GLSL-Versions
@@ -89,12 +90,7 @@ class FoxShader {
 		color: -1,
 		boneWeight: -1,
 		boneIndex: -1,
-		instanceData: {
-			data0: -1,
-			data1: -1,
-			data2: -1,
-			color: -1
-		}
+		instanceData: -1
 	};
 
 	/**
@@ -179,6 +175,10 @@ class FoxShader {
 			vert = StringTools.replace(vert, PRAGMA_OPENGL4, OPENGL4_VERSION);
 			frag = StringTools.replace(frag, PRAGMA_OPENGL4, OPENGL4_VERSION);
 		}
+
+		var openglContextVersion = '#version ${FoxRenderer.getGLSLVersion()}';
+		vert = StringTools.replace(vert, PRAGMA_OPENGL_AUTO, openglContextVersion);
+		frag = StringTools.replace(frag, PRAGMA_OPENGL_AUTO, openglContextVersion);
 		
 		// ---- Process foxlite flags ----
 
@@ -344,10 +344,7 @@ class FoxShader {
 		attribIdx.color = gl.getAttribLocation(glProgram, "foxlite_Color");
 		attribIdx.boneWeight = gl.getAttribLocation(glProgram, "foxlite_BoneWeight");
 		attribIdx.boneIndex = gl.getAttribLocation(glProgram, "foxlite_BoneIndex");
-		attribIdx.instanceData.data0 = gl.getAttribLocation(glProgram, "foxlite_InstanceData0");
-		attribIdx.instanceData.data1 = gl.getAttribLocation(glProgram, "foxlite_InstanceData1");
-		attribIdx.instanceData.data2 = gl.getAttribLocation(glProgram, "foxlite_InstanceData2");
-		attribIdx.instanceData.color = gl.getAttribLocation(glProgram, "foxlite_InstanceColor");
+		attribIdx.instanceData = gl.getAttribLocation(glProgram, "foxlite_InstanceData");
 		__uSkinnedLocation = uniformCache.get("uSkinned")?.location ?? -1;
 		__uInstancedLocation = uniformCache.get("uInstanced")?.location ?? -1;
 		// Bone data
