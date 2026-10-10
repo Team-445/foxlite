@@ -231,13 +231,15 @@ class FoxShader {
 			}
 
 			// Skip if it's inside a comment
-			if(StringTools.startsWith(line, "//") ||
-			   StringTools.startsWith(line, "/*") ||
-			   StringTools.startsWith(line, "*")
-			) {
-				source = includes.replace(source, "// Skipped: " + file);
-				continue;
-			}
+			// this is being weird for like no reason so goodbye for now
+			//if(StringTools.startsWith(line, "//") ||
+			//   StringTools.startsWith(line, "/*") ||
+			//   StringTools.startsWith(line, "*")
+			//) {
+			//	trace(line, StringTools.startsWith(line, "//"), StringTools.startsWith(line, "/*"), StringTools.startsWith(line, "*"));
+			//	source = includes.replace(source, "// Skipped: " + file);
+			//	continue;
+			//}
 			#if foxlite_verbose
 			FoxLog.log("FoxShader", "Including shader source: " + file);
 			#end
