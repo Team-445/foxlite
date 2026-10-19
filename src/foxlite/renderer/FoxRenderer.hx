@@ -1280,7 +1280,7 @@ class FoxRenderer {
 				var ext = haxe.io.Path.extension(fileName) == "" ? shaderTypeExtStr : "";
 				log = e.replace(log, '$1: $fileName$ext:$line:');
 			}
-			var msg = 'Error compiling $shaderTypeStr shader: \n$log';
+			var msg = 'Error compiling $shaderTypeStr shader: \n$log' #if foxlite_verbose + '\n=============SOURCE===========\n$source============END SOURCE===========' #end;
 			FoxLog.log('FoxRenderer', msg);
 			return false;
 		}
