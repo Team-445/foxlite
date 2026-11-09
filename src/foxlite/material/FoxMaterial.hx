@@ -228,23 +228,31 @@ class FoxMaterial {
 		Uploads uniform data to the shader when this material is active.
 	**/
 	public function pushShaderUniforms(passShader:FoxShader) {
-		for(param in params.keyValueIterator()) {
-			// HScript Polymod has blacklisted Type.typeof so no switch case for us.
-			if(Std.isOfType(param.value, Bool)) passShader.setBool(param.key, param.value);
-			else if(Std.isOfType(param.value, Float) || Std.isOfType(param.value, Int)) {
-				if(passShader.uniformCache.get(param.key)?.type == UType.INT) passShader.setInt(param.key, param.value);
-				else passShader.setFloat(param.key, param.value);
-			}
-			else if(Std.isOfType(param.value, Array)) passShader.setFloatArray(param.key, param.value);
-			else if(Std.isOfType(param.value, Matrix3D)) passShader.setMatrix4(param.key, param.value);
-			else if(Std.isOfType(param.value, Vector2)) passShader.setVector2(param.key, param.value);
-			else if(Std.isOfType(param.value, Vector3D) || Std.isOfType(param.value, Vector4)) {
-				if(passShader.uniformCache.get(param.key)?.type == UType.FLOAT_VEC3) passShader.setVector3(param.key, param.value);
-				else passShader.setVector4(param.key, param.value);
+		for(key => value in params) {
+			// HScript Polymod has blacklisted Type.typeof so no switch case for us.'
+			// WE are not polymod
+			switch Type.typeof(value)
+			{
+				case TBool:
+					passShader.setBool(key, value);
+				case TInt, TFloat:
+					if(passShader.uniformCache.get(key)?.type == UType.INT) passShader.setInt(key, value);
+					else passShader.setFloat(key, value);
+				case TClass(Array):
+					passShader.setFloatArray(key, value);
+				case TClass(Matrix3D):
+					passShader.setMatrix4(key, value);
+				case TClass(Vector2):
+					passShader.setVector2(key, value);
+				case TClass(Vector3D), TClass(Vector4):
+					if(passShader.uniformCache.get(key)?.type == UType.FLOAT_VEC3) passShader.setVector3(key, value);
+					else passShader.setVector4(key, value);
+				default:
+					// nothing
 			}
 		}
 		
-		for(tex in textures.keyValueIterator()) passShader.setSampler2D(tex.key, tex.value);
+		for(key => tex in textures) passShader.setSampler2D(key, tex);
 		passShader.setFloat("alphaScissor", alphaScissor);
 	}
 
